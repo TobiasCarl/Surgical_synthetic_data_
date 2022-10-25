@@ -1,11 +1,11 @@
-# Surgical_synthetic_data_
-# Project Title
+# Surgical_synthetic_data  
+
 
 Simple overview of use
 
-## Description
+## Description 2D synthetic data  
 
-An in-depth paragraph about your project and overview of use.
+Extracting interesting objects from image, replacing background with transparent background and cropping area around the object. The extracted objects are then placed randomly in the background.  
 
 ## Getting Started
 
