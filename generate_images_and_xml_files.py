@@ -2,6 +2,7 @@ import argparse
 import glob
 import os
 import xml.etree.ElementTree as ET
+import random
 
 from ast import Tuple
 from calendar import c
@@ -116,6 +117,16 @@ def save_annotations(tree, final_image_path):
     xml_path = final_image_path[:-4] + ".xml"
     tree.write(xml_path)
 
+def is_overlap(l1, r1, l2, r2):
+    if l1[0] > r2[0] or l2[0] > r1[0]:
+        return False
+
+    if l1[1] > r2[1] or l2[1] > r1[1]:
+        return False
+
+    return True
+
+
 
 
 '''
@@ -162,18 +173,19 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
         
         #Loop over each selected object image and perform object extraction and then augmentation and saves the resulting image
         #as a png. Then open the image as PIL, rotate and scale it and place it on the background image.
+        list_of_objects_on_backg = []
         for i in indicies:
             object_image_path = object_image_paths[i]
 
-            cv2_img = cv2.imread(object_image_path)
+            cv2_img = cv2.imread(object_image_path, cv2.IMREAD_UNCHANGED)
             cv2_img_cropped = extract_obj_from_greenscreen_and_add_alpha_channel(cv2_img)
             cv2_img_cropped_augmented = image_augmentation(cv2_img_cropped[:,:,0:3]) #alpha channel removed
             cv2_img_cropped_augmented = cv2.cvtColor(cv2_img_cropped_augmented, cv2.COLOR_BGR2BGRA)
             cv2_img_cropped_augmented[:, :, 3] = cv2_img_cropped[:,:,3] #alpha channel restored
 
             #save as png
-            temp_path = object_image_path.replace(os.path.basename(object_image_path), "temp_img_61045618034.png")
-            cv2.imwrite(temp_path, cv2_img_cropped_augmented)
+            #temp_path = object_image_path.replace(os.path.basename(object_image_path), "temp_img_61045618034.png")
+            #cv2.imwrite(temp_path, cv2_img_cropped_augmented)
 
 
             
@@ -181,12 +193,14 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
             background_height = pil_background_image.height
 
             #open the augmentated object image in PIL format, easier to perform rotations and add images onto each other using PIL
-            #than using opencv.
-            pil_img = Image.open(temp_path)
+            #than using opencv. 
+            #Converting cv2 image to pil
+            pil_img = Image.fromarray(cv2.cvtColor(cv2_img_cropped_augmented, cv2.COLOR_BGRA2RGBA))
             pil_img = pil_img.rotate(rng.randint(0,360), expand=True)
             
 
             #scale the object image so that it fits inside the background image
+            
             object_width = pil_img.width
             object_height = pil_img.height
             if object_width/background_width >= object_height/background_height:
@@ -194,24 +208,34 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
             else:
                 ratio = object_height/background_height
 
-            max_scaling = 10*ratio
-            scaling = max(max(3, ratio), max_scaling*rng.random()) #make sure the object image is smaller than the background image
-            pil_img = pil_img.resize((int(pil_img.width/scaling) ,int(pil_img.height/scaling)),  Image.Resampling.LANCZOS)
-
+            #Rescale to same size as background
+            pil_img= pil_img.resize((int(pil_img.width/ratio) ,int(pil_img.height/ratio)),  Image.Resampling.LANCZOS)
 
             #Randomly paste the object image onto the background image.
-            #NOTE: Does not check if objects will overlap
-            object_width = pil_img.width
-            object_height = pil_img.height
-            img_pos_x = rng.randint(0,background_width - object_width)
-            img_pos_y = rng.randint(0, background_height - object_height)
+            #NOTE: It does not check if objects will overlap
+            
 
+            while True:
+                #What factor to use for downscale
+                scale_fac =random.randint(3,7)
+                pil_img_cp = pil_img.resize((int(pil_img.width/scale_fac) ,int(pil_img.height/scale_fac)),  Image.Resampling.LANCZOS)
+                object_width = pil_img_cp.width
+                object_height = pil_img_cp.height
+                img_pos_x = rng.randint(0,background_width - object_width)
+                img_pos_y = rng.randint(0, background_height - object_height)
+                l2, r2 = (img_pos_x, img_pos_y), (img_pos_x+object_width, img_pos_y+object_height)
+
+                if all(not is_overlap(l1, r1, l2, r2) for l1, r1 in list_of_objects_on_backg):
+                    list_of_objects_on_backg.append((l2, r2))
+                    break
+
+                    
             #third argument uses the alpha channel of the image as a mask
-            pil_background_image.paste(pil_img, (img_pos_x, img_pos_y), pil_img)
+            pil_background_image.paste(pil_img_cp, (img_pos_x, img_pos_y), pil_img_cp)
 
             #Calculate the bounding box for the object based on the alpha channel
             #A for alpha channel
-            alpha_channel = pil_img.getchannel("A")
+            alpha_channel = pil_img_cp.getchannel("A")
             cv2_img = np.array(alpha_channel)
             bbox_xmin, bbox_ymin, bbox_width, bbox_height = cv2.boundingRect(cv2_img)
 
@@ -220,6 +244,7 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
             xmax = xmin + bbox_width-1
             ymax = ymin + bbox_height-1
             add_annotation(tree, xmin, ymin, xmax, ymax, "forceps")
+
             
             
         pil_background_image.save(output_folder + os.path.basename(background_image_path).replace(".jpg", ".png"))
