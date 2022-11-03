@@ -128,8 +128,11 @@ def is_overlap(l1, r1, l2, r2):
 
     return True
 
-
-
+def replace_green_background_with_white(cv2_img):
+    alpha_channel = 255 - cv2_img[:, :, 3]
+    for i in range(3):
+        cv2_img[: ,: , i] = cv2.add(cv2_img[: ,: , i], alpha_channel)
+    return cv2_img
 
 '''
 Calculates a mask for objects that are in front of a green screen. Then augmentations are applied to the original image
@@ -187,6 +190,7 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
 
             cv2_img = cv2.imread(object_image_path, cv2.IMREAD_UNCHANGED)
             cv2_img = extract_obj_from_greenscreen_and_add_alpha_channel(cv2_img)
+            cv2_img = replace_green_background_with_white(cv2_img)
             cv2_img_aug = image_augmentation(cv2_img[:,:,0:3]) #alpha channel removed
             cv2_img_aug = cv2.cvtColor(cv2_img_aug, cv2.COLOR_BGR2BGRA)
             cv2_img_aug[:, :, 3] = cv2_img[:,:,3] #alpha channel restored
