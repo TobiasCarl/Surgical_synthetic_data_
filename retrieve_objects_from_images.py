@@ -12,6 +12,7 @@ import argparse
 def extract_obj_from_greenscreen(file_path):
     img = cv2.imread(file_path)
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    #with red background, use: A = 255 - lab[:, :, 1]
     A = lab[:, :, 1]
     thresh = cv2.threshold(A, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
     blur = cv2.GaussianBlur(thresh, (0, 0), sigmaX=5,

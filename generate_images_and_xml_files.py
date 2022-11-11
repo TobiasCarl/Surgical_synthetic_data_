@@ -68,6 +68,7 @@ def extract_obj_from_greenscreen_and_add_alpha_channel(cv2_img):
     #convert to LAB color space
     lab = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2LAB)
     #Coordinate that represents the position between red and green
+    #with red background, use: A = 255 - lab[:, :, 1]
     A = lab[:, :, 1]
     #Otsu's method of thresholding, threshold value is automatically calculated
     #then values below threshold are set to 0 and values above are set to the maxval argument
@@ -182,7 +183,7 @@ def generate_images(object_folder, background_folder, output_folder, generate, m
         for i in indicies:
             object_image_path = object_image_paths[i]
 
-            classes = ["diathermy", "needle_driver", "forceps"]
+            classes = ["diathermy", "needle_driver", "forceps", "sax"]
             class_name = " "
             for cls in classes:
                 if cls in object_image_path:
