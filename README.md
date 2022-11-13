@@ -23,3 +23,8 @@ python put_new_background_video.py -i demo_video_background/demo_greenscreen_vid
 
 Take a look at the resulting video in demo_video_background
 
+
+To run generate_synthetic data you have to list all folders after -obj_f flag like in the example below. You also have to list corresponding class name in the same order lika previous after the -obj class
+flag. -max_overlap flag describes how much the object masks can overlap with eachother. Other than that, just try and follow the example below.
+
+python generate_synthetic_data.py -obj_f /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_forceps/images /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_dia/images /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_needle/images /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_scissors/images -obj_c forceps diathermy 'needle driver' scissors -bg /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/bg2 -out /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/demo_test_output -generate 10 -max_obj 5 -max_overlap 0.3
