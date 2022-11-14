@@ -168,6 +168,8 @@ def add_obj(img_comp, mask_comp, img, mask, x, y, idx):
 
 def check_areas(mask_comp, obj_areas, overlap_degree=0.3):
     obj_ids = np.unique(mask_comp).astype(np.uint8)[1:-1]
+    #Här hämtas listan av vad som syns i respektive mask. De hämtas genom att pixlarna skiljer lite på varje mask.
+    #Varje mask skiljer en pixel och mask_comp innehåller all info, alltså hur alla masks ligger på varandra.
     masks = mask_comp == obj_ids[:, None, None]
 
     ok = True
@@ -175,7 +177,7 @@ def check_areas(mask_comp, obj_areas, overlap_degree=0.3):
     if len(np.unique(mask_comp)) != np.max(mask_comp) + 1:
         ok = False
         return ok
-
+    ##Varje masks synliga area finns i obj_areas. 
     for idx, mask in enumerate(masks):
 
         if np.count_nonzero(mask) / obj_areas[idx] < 1 - overlap_degree:
