@@ -25,6 +25,13 @@ def get_args():
 
     return parser.parse_args()
 
+def replace_background_with_white(cv2_img, mask):
+    cv2_img = cv2_img.copy()
+    for i in range(3):
+        cv2_img[mask == 1, i] = 255
+    return cv2_img
+
+
 '''
 First the image is randomly flipped and cropped, then the object is extracted and a mask is generated
 '''
@@ -60,6 +67,8 @@ def get_img_and_mask(img_path):
     mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
     mask_b = mask[:, :, 0] == 0  
     mask = mask_b.astype(np.uint8)  
+
+    cv2_img = replace_background_with_white(cv2_img, mask)
 
     return cv2_img, mask
 
