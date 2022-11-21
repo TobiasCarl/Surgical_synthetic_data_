@@ -8,16 +8,26 @@ import random
 import xml.etree.ElementTree as ET
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-obj_f', '--object_folder',nargs='+', required=True, action='store', default='.', help="folder with object images with green screen background")
-    parser.add_argument('-obj_c', '--object_classes',nargs='+', required=True, action='store', default='.', help="classes of the folders")
-    parser.add_argument('-bg', '--background_folder', required=True, action='store', default='.', help="Folder with background images")
-    parser.add_argument('-out', '--output_folder', required=True, action='store', default='.', help="Folder where generated images are stored")
-    parser.add_argument('-generate', '--generate', required=True,type=int, action='store', default='.', help="How many images to generate")
-    parser.add_argument('-max_obj', '--max_obj', required=True,type=int, action='store', default='.', help="Max number of objects per image")
-    parser.add_argument('-max_overlap', '--max_ovp', required=True,type=float, action='store', default='.', help="Max overlap of objects per image")
+    parser.add_argument('-obj_f', '--object_folder',nargs='+', required=True, action='store', default='.', 
+        help="a list of folders, one for each class, with object images with green screen background")
+    parser.add_argument('-obj_c', '--object_classes',nargs='+', required=True, action='store', default='.', 
+        help="a list of class names corresponding to the list of object folders")
+    parser.add_argument('-bg', '--background_folder', required=True, action='store', default='.', 
+        help="Folder with background images")
+    parser.add_argument('-out', '--output_folder', required=True, action='store', default='.', 
+        help="Folder where generated images are stored")
+    parser.add_argument('-generate', '--generate', required=True,type=int, action='store', default='.', 
+        help="How many images to generate")
+    parser.add_argument('-max_obj', '--max_obj', required=True,type=int, action='store', default='.', 
+        help="Max number of objects per image")
+    parser.add_argument('-max_overlap', '--max_ovp', required=True,type=float, action='store', default='.', 
+        help="Max overlap of objects per image")
 
     return parser.parse_args()
 
+'''
+First the image is randomly flipped and cropped, then the object is extracted and a mask is generated
+'''
 def get_img_and_mask(img_path):
     cv2_img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     flip = Al.Compose([
@@ -34,7 +44,8 @@ def get_img_and_mask(img_path):
     cv2_img = crop(image=cv2_img, bboxes=[])["image"]
     lab = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2LAB)
     # Coordinate that represents the position between red and green
-    A = lab[:, :, 1]
+    #with red background, use: A = 255 - lab[:, :, 1]
+    A = 255 - lab[:, :, 1]
     # Otsu's method of thresholding, threshold value is automatically calculated
     # then values below threshold are set to 0 and values above are set to the maxval argument
     A = cv2.threshold(A, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
@@ -44,6 +55,7 @@ def get_img_and_mask(img_path):
     # What does resacle_intensity do?
     mask = skimage.exposure.rescale_intensity(blur, in_range=(
         127.5, 255), out_range=(0, 255)).astype(np.uint8)
+    
     mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
     mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
     mask_b = mask[:, :, 0] == 0  
@@ -53,14 +65,16 @@ def get_img_and_mask(img_path):
 
 
 
-
+'''
+Performs image augmentation and resizing
+'''
 def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
 
     transform = Al.Compose([
         Al.RandomBrightnessContrast(),
         Al.RandomGamma(),
         Al.augmentations.transforms.Downscale(
-            scale_min=0.10, scale_max=0.75, interpolation=cv2.INTER_LINEAR, always_apply=False, p=0.5)
+            scale_min=0.30, scale_max=0.75, interpolation=cv2.INTER_LINEAR, always_apply=False, p=0.5)
 
     ], bbox_params=Al.BboxParams(format='yolo'))
     transformed = transform(image=img, bboxes=[])
@@ -89,7 +103,9 @@ def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
 
     return img_t, mask_t
 
-
+'''
+Adds an object to the background image 
+'''
 def add_obj(img_comp, mask_comp, img, mask, x, y, idx):
     '''
     img_comp - composition of objects
@@ -100,6 +116,7 @@ def add_obj(img_comp, mask_comp, img, mask, x, y, idx):
     Function returns img_comp in CV2 RGB format + mask_comp
     '''
     h_comp, w_comp = img_comp.shape[0], img_comp.shape[1]
+   
 
     h, w = img.shape[0], img.shape[1]
 
@@ -186,7 +203,9 @@ def check_areas(mask_comp, obj_areas, overlap_degree=0.3):
 
     return ok
 
-
+'''
+Positions objects on a background image, they may overlap to a certain degree.
+'''
 def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max,
                        max_objs=5,
                        overlap_degree=0.2,
@@ -208,6 +227,8 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max,
 
         obj_idx = np.random.randint(len(obj_dict)) + 1
 
+        #Randomly places an object on the background and tries again if to much
+        #overlap occured
         for _ in range(max_attempts_per_obj):
 
             imgs_number = len(obj_dict[obj_idx]['images'])
@@ -234,6 +255,7 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max,
                 i += 1
                 break
             else:
+                
                 img_comp_prev, mask_comp_prev = img_comp.copy(), mask_comp.copy()
                 img_comp, mask_comp, mask_added = add_obj(img_comp,
                                                           mask_comp,
@@ -242,6 +264,7 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max,
                                                           x,
                                                           y,
                                                           i)
+                #If new object is not vailidly placed, revert back to the old state
                 ok = check_areas(mask_comp, obj_areas, overlap_degree)
                 if ok:
                     obj_areas.append(np.sum(mask_added == 0))
@@ -302,8 +325,9 @@ def generate_images_and_xml(INPUT_LIST, BACKGROUND_PATH, NUMBER_OF_IMAGES, MAX_O
     for k in INPUT_LIST:
         files_imgs = sorted(os.listdir(k[1]))
         files_imgs = [os.path.join(k[1], f) for f in files_imgs]
-        obj_dict[INPUT_NUMBER] = {'folder': k[1],
-                                  'class': k[0], 'images': files_imgs}
+        obj_dict[INPUT_NUMBER] = {'folder': k[1], #folder path
+                                  'class': k[0],  #class name
+                                  'images': files_imgs} #image path
         INPUT_NUMBER += 1
     ##colors = {1: (255, 0, 0), 2: (0, 255, 0),
     ##          3: (0, 0, 255), 4: (0, 255, 255), 5: (255, 255, 0), 6: (255, 0, 255), 5: (255, 255, 255)}
@@ -311,19 +335,23 @@ def generate_images_and_xml(INPUT_LIST, BACKGROUND_PATH, NUMBER_OF_IMAGES, MAX_O
     for x in range(NUMBER_OF_IMAGES):
         image_background_path = random.choice(files_bg_imgs)
         img_bg = cv2.imread(image_background_path)
-        img_bg = cv2.cvtColor(img_bg, cv2.COLOR_BGR2RGB)
+        #img_bg = cv2.cvtColor(img_bg, cv2.COLOR_BGR2RGB)
         h, w = img_bg.shape[0], img_bg.shape[1]
         mask_comp = np.zeros((h, w), dtype=np.uint8)
         img_comp = img_bg.copy()
+
+        #Place objects on one background image
         img_comp, mask_comp, labels_comp, obj_areas = create_composition(obj_dict, img_bg, h*0.1, h*0.5,
                                                                          max_objs=MAX_OBJECTS_PER_IMG,
                                                                          overlap_degree=OVERLAP_DEGREE,
                                                                          max_attempts_per_obj=10)
+        #save image
         img_comp_bboxes = img_comp.copy()
         new_output_name = os.path.join(OUTPUT_FOLDER, os.path.basename(
             image_background_path))[:-4]+"gen_"+str(x)+".png"
         cv2.imwrite(new_output_name, img_comp_bboxes)
 
+        #save annotations
         obj_ids = np.unique(mask_comp).astype(np.uint8)[1:]
         masks = mask_comp == obj_ids[:, None, None]
         tree = initiate_annotation(new_output_name, w, h)
@@ -359,12 +387,14 @@ def main():
     args = get_args()
     count = 0
     test_input_list=[]
+    #the object folders are matched with their class names
     for obj_folder in args.object_folder:
         test_input_list+= [(args.object_classes[count],obj_folder)]
         count+=1
 
     generate_images_and_xml(
-        test_input_list, args.background_folder, args.generate, args.max_obj, args.output_folder,args.max_ovp)    
+        test_input_list, args.background_folder, args.generate, args.max_obj, args.output_folder,args.max_ovp
+    )    
 
 if __name__ == "__main__":
     main()
