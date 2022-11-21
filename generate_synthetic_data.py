@@ -6,6 +6,10 @@ import albumentations as Al
 import skimage.exposure
 import random
 import xml.etree.ElementTree as ET
+
+from PIL import Image
+import random as rand
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-obj_f', '--object_folder',nargs='+', required=True, action='store', default='.', 
@@ -39,7 +43,7 @@ def get_img_and_mask(img_path):
     cv2_img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     flip = Al.Compose([
         Al.HorizontalFlip(p=0.5),
-        Al.VerticalFlip(p=0.5)
+        Al.VerticalFlip(p=0.5),
     ], bbox_params=Al.BboxParams(format='yolo'))
 
     crop = Al.Compose([
@@ -104,6 +108,29 @@ def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
         image=transformed_image, mask=mask)
     img_t = transformed_resized["image"]
     mask_t = transformed_resized["mask"]
+
+    m = mask_t.copy()
+    #cv2.imshow("hej", m.astype(float))
+    #cv2.waitKey(0)
+    
+
+    #Rotation by converting to PIL
+    #-------------------------------------------------------------------------------------------------
+    
+    #changes the mask value from 0 because the rotated image will generate pixelvalues = 0
+    mask_t[mask_t == 0] = 100
+
+    pil_img = Image.fromarray(img_t)
+    pil_mask = Image.fromarray(mask_t)
+    angle = rand.randint(0,360)
+    pil_img = pil_img.rotate(angle, expand=True)
+    pil_mask = pil_mask.rotate(angle, expand=True)
+    img_t = np.array(pil_img)
+    mask_t = np.array(pil_mask)
+    #resets the original mask values to 0 and changes the newly added pixels to 1.
+    mask_t[mask_t == 0] = 1
+    mask_t[mask_t == 100] = 0
+    #-------------------------------------------------------------------------------------------------
 
     if transforms:
         transformed = transforms(image=img_t, mask=mask_t)
