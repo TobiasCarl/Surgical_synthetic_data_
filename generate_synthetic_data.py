@@ -6,50 +6,51 @@ import albumentations as Al
 import skimage.exposure
 import random
 import xml.etree.ElementTree as ET
-from random import randrange
 from tqdm import tqdm
+
+from PIL import Image
+import random as rand
+import numpy
+import time
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-obj_f', '--object_folder', nargs='+', required=True, action='store',
-                        default='.', help="folder with object images with green screen background")
-    parser.add_argument('-obj_c', '--object_classes', nargs='+', required=True,
-                        action='store', default='.', help="classes of the folders")
-    parser.add_argument('-bg', '--background_folder', required=True,
-                        action='store', default='.', help="Folder with background images")
-    parser.add_argument('-out', '--output_folder', required=True, action='store',
-                        default='.', help="Folder where generated images are stored")
-    parser.add_argument('-generate', '--generate', required=True, type=int,
-                        action='store', default='.', help="How many images to generate")
-    parser.add_argument('-max_obj', '--max_obj', required=True, type=int,
-                        action='store', default='.', help="Max number of objects per image")
-    parser.add_argument('-max_overlap', '--max_ovp', required=True, type=float,
-                        action='store', default='.', help="Max overlap of objects per image")
 
-    parser.add_argument('-np', '--noisepath', required=True,
-                        action='store', default='.', help="Folder with noise images")
-
+    parser.add_argument('-config', '--config_path',  required=True, action='store', default='.',
+                        help="Config file that describes augmentation parameters")
     return parser.parse_args()
 
 
-def get_img_and_mask(img_path):
+'''
+Replace background of image with average color of cv2_img pixels that contain the mask.
+'''
+
+
+def replace_background_with_average_color(cv2_img, mask):
+    for i in range(3):
+        cv2_img[mask == 1, i] = np.mean(cv2_img[mask == 0, i])
+    return cv2_img
+
+
+'''
+First the image is randomly flipped and cropped, then the object is extracted and a mask is generated
+'''
+
+
+def get_img_and_mask(img_path, color):
+
     cv2_img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-    flip = Al.Compose([
-        Al.HorizontalFlip(p=0.5),
-        Al.VerticalFlip(p=0.5)
-    ], bbox_params=Al.BboxParams(format='yolo'))
 
-    crop = Al.Compose([
-        Al.RandomCropFromBorders(crop_left=random.uniform(0.2, 0.4), crop_right=random.uniform(
-            0.2, 0.4), crop_top=random.uniform(0.2, 0.4), crop_bottom=random.uniform(0.2, 0.4), always_apply=False, p=1.0),
-    ], bbox_params=Al.BboxParams(format='yolo'))
 
-    cv2_img = flip(image=cv2_img, bboxes=[])["image"]
-    cv2_img = crop(image=cv2_img, bboxes=[])["image"]
     lab = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2LAB)
     # Coordinate that represents the position between red and green
-    A = lab[:, :, 1]
+    # with red background, use: A = 255 - lab[:, :, 1]
+    if (color == "red"):
+        A = 255 - lab[:, :, 1]
+    elif (color == "green"):
+        A = lab[:, :, 1]
+
     # Otsu's method of thresholding, threshold value is automatically calculated
     # then values below threshold are set to 0 and values above are set to the maxval argument
     A = cv2.threshold(A, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
@@ -59,12 +60,19 @@ def get_img_and_mask(img_path):
     # What does resacle_intensity do?
     mask = skimage.exposure.rescale_intensity(blur, in_range=(
         127.5, 255), out_range=(0, 255)).astype(np.uint8)
+
     mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
     mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
     mask_b = mask[:, :, 0] == 0
     mask = mask_b.astype(np.uint8)
+    cv2_img = replace_background_with_average_color(cv2_img, mask)
 
     return cv2_img, mask
+
+
+'''
+Performs image augmentation and resizing
+'''
 
 
 def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
@@ -73,9 +81,21 @@ def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
         Al.RandomBrightnessContrast(),
         Al.RandomGamma(),
         Al.augmentations.transforms.Downscale(
-            scale_min=0.10, scale_max=0.75, interpolation=cv2.INTER_LINEAR, always_apply=False, p=0.5)
+            scale_min=0.30, scale_max=0.75, interpolation=cv2.INTER_LINEAR, always_apply=False, p=0.5)
 
     ], bbox_params=Al.BboxParams(format='yolo'))
+    flip = Al.Compose([
+        Al.HorizontalFlip(p=0.5),
+        Al.VerticalFlip(p=0.5),
+    ], bbox_params=Al.BboxParams(format='yolo'))
+
+    crop = Al.Compose([
+        Al.RandomCropFromBorders(crop_left=random.uniform(0.2, 0.4), crop_right=random.uniform(
+            0.2, 0.4), crop_top=random.uniform(0.2, 0.4), crop_bottom=random.uniform(0.2, 0.4), always_apply=False, p=1.0),
+    ], bbox_params=Al.BboxParams(format='yolo'))
+
+    img = flip(image=img, bboxes=[])["image"]
+    img = crop(image=img, bboxes=[])["image"]
     transformed = transform(image=img, bboxes=[])
     transformed_image = transformed['image']
     h, w = transformed_image.shape[0], transformed_image.shape[1]
@@ -95,12 +115,40 @@ def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
     img_t = transformed_resized["image"]
     mask_t = transformed_resized["mask"]
 
+    m = mask_t.copy()
+    #cv2.imshow("hej", m.astype(float))
+    # cv2.waitKey(0)
+
+    # Rotation by converting to PIL
+    # -------------------------------------------------------------------------------------------------
+
+    # changes the mask value from 0 because the rotated image will generate pixelvalues = 0
+    mask_t[mask_t == 0] = 100
+
+    pil_img = Image.fromarray(img_t)
+    pil_mask = Image.fromarray(mask_t)
+    angle = rand.randint(0, 360)
+    pil_img = pil_img.rotate(angle, expand=True)
+    pil_mask = pil_mask.rotate(angle, expand=True)
+
+    img_t = np.array(pil_img)
+    mask_t = np.array(pil_mask)
+    # resets the original mask values to 0 and changes the newly added pixels to 1.
+    mask_t[mask_t == 0] = 1
+    mask_t[mask_t == 100] = 0
+    # -------------------------------------------------------------------------------------------------
+
     if transforms:
         transformed = transforms(image=img_t, mask=mask_t)
         img_t = transformed["image"]
         mask_t = transformed["mask"]
 
     return img_t, mask_t
+
+
+'''
+Adds an object to the background image
+'''
 
 
 def add_obj(img_comp, mask_comp, img, mask, x, y, idx, is_noise=False):
@@ -115,10 +163,11 @@ def add_obj(img_comp, mask_comp, img, mask, x, y, idx, is_noise=False):
     h_comp, w_comp = img_comp.shape[0], img_comp.shape[1]
 
     h, w = img.shape[0], img.shape[1]
-
+    '''if (random.randint(0, 100) in range(0, int(100*0.5))):
+        img = shade(img,random.uniform(0.1, 0.7))
+    '''
     x = x - int(w/2)
     y = y - int(h/2)
-
     mask_b = mask == 0
     mask_rgb_b = np.stack([mask_b, mask_b, mask_b], axis=2)
     mask_added = []
@@ -186,7 +235,7 @@ def add_obj(img_comp, mask_comp, img, mask, x, y, idx, is_noise=False):
     return img_comp, mask_comp, mask_added
 
 
-def check_areas(mask_comp, obj_areas,labels_comp=[], overlap_degree=0.3,i =10):
+def check_areas(mask_comp, obj_areas, labels_comp=[], overlap_degree=0.3, i=10):
     obj_ids = np.unique(mask_comp).astype(np.uint8)[1:-1]
 
     # Här hämtas listan av vad som syns i respektive mask. De hämtas genom att pixlarna skiljer lite på varje mask.
@@ -194,28 +243,33 @@ def check_areas(mask_comp, obj_areas,labels_comp=[], overlap_degree=0.3,i =10):
     masks = mask_comp == obj_ids[:, None, None]
 
     ok = True
-
     for idx, mask in enumerate(masks):
-        print(obj_ids)
-
-        print(labels_comp)
-        print(obj_areas)
-        print(idx)
-        print("obj_areas[idx]",obj_areas[idx])
-
-
-        if np.count_nonzero(mask) / obj_areas[idx][0] < 1 - overlap_degree:
-            ok = False
-            break
+        if (obj_areas[idx][0] != 0):
+            if np.count_nonzero(mask) / obj_areas[idx][0] < 1 - overlap_degree:
+                ok = False
+                break
 
     return ok
 
+def shade(imag, percent):
+    """
+    imag: the image which will be shaded
+    percent: a value between 0 (image will remain unchanged
+             and 1 (image will be blackened)
+    """
+    tinted_imag = imag * (1 - percent)
+    return tinted_imag
 
-def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_objects,
+'''
+Positions objects on a background image, they may overlap to a certain degree.
+'''
+
+
+def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_dict,
                        max_objs=5,
                        overlap_degree=0.2,
                        max_attempts_per_obj=10,
-                       fac=0.5
+                       fac=0.5,saved_images_and_masks={}
                        ):
 
     img_comp = img_comp_bg.copy()
@@ -229,22 +283,31 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_o
 
     i = 1
     p = 1
-    random_obj =0
+    random_obj = 0
     for _ in range(1, num_objs):
-
         obj_idx = np.random.randint(len(obj_dict)) + 1
-
+        noise_idx = np.random.randint(len(noise_dict)) + 1
+        # Randomly places an object on the background and tries again if to much
+        # overlap occured
         for _ in range(max_attempts_per_obj):
 
             imgs_number = len(obj_dict[obj_idx]['images'])
             idx = np.random.randint(imgs_number)
             img_path = obj_dict[obj_idx]['images'][idx]
-            img, mask = get_img_and_mask(img_path)
+            ##If it is saved, take mask and image directly.
+            if img_path in saved_images_and_masks:
+                img,mask = saved_images_and_masks[img_path]
+            else:
+                img, mask = get_img_and_mask(
+                    img_path, obj_dict[obj_idx]["background_color"])
+                saved_images_and_masks[img_path] = (img,mask)
+
             img, mask = resize_transform_obj(img,
                                              mask,
                                              longest_min,
                                              longest_max
                                              )
+
             x, y = np.random.randint(w), np.random.randint(h)
 
             if i == 1:
@@ -256,14 +319,21 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_o
                                                           x,
                                                           y,
                                                           i)
-                obj_areas.append((np.sum(mask_added == 0),i))
-                labels_comp.append((obj_idx,i))
+                obj_areas.append((np.sum(mask_added == 0), i))
+                labels_comp.append((obj_idx, i))
                 i += 1
                 img_comp_prev, mask_comp_prev = img_comp.copy(), mask_comp.copy()
 
-                if (random.randint(0, 100) in range(0,int(100*fac))):
-                    img, mask = get_img_and_mask(noise_objects[np.random.randint(len(noise_objects))]
-                                                 )
+                if (random.randint(0, 100) in range(0, int(100*fac))):
+                    img_path = noise_dict[noise_idx]["images"][np.random.randint(
+                        len(noise_dict[noise_idx]["images"]))]
+                    if img_path in saved_images_and_masks:
+                        img,mask = saved_images_and_masks[img_path]
+                    else:
+                        img, mask = get_img_and_mask(img_path, noise_dict[noise_idx]["background_color"])
+                        saved_images_and_masks[img_path] = (img,mask)
+
+
                     img, mask = resize_transform_obj(img,
                                                      mask,
                                                      longest_min,
@@ -279,22 +349,22 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_o
                                                               15 + random_obj
                                                               )
 
-
-
-
-
-                    noise_ok = check_areas(mask_comp, obj_areas,labels_comp, overlap_degree,i)
+                    noise_ok = check_areas(
+                        mask_comp, obj_areas, labels_comp, overlap_degree, i)
                     if noise_ok:
 
-                        obj_areas.append((np.sum(mask_added == 0),15 + random_obj))
-                        labels_comp.append((obj_idx,15 + random_obj))
-                        random_obj +=1
+                        obj_areas.append(
+                            (np.sum(mask_added == 0), 15 + random_obj))
+                        labels_comp.append((obj_idx, 15 + random_obj))
+                        random_obj += 1
                         break
                     else:
                         img_comp, mask_comp = img_comp_prev.copy(), mask_comp_prev.copy()
+                        break
 
                 break
             else:
+
                 img_comp_prev, mask_comp_prev = img_comp.copy(), mask_comp.copy()
                 img_comp, mask_comp, mask_added = add_obj(img_comp,
                                                           mask_comp,
@@ -303,18 +373,25 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_o
                                                           x,
                                                           y,
                                                           i)
-                ok = check_areas(mask_comp, obj_areas,labels_comp, overlap_degree,i)
+                ok = check_areas(mask_comp, obj_areas,
+                                 labels_comp, overlap_degree, i)
                 if ok:
-                    obj_areas.append((np.sum(mask_added == 0),i))
-                    labels_comp.append((obj_idx,i))
+                    obj_areas.append((np.sum(mask_added == 0), i))
+                    labels_comp.append((obj_idx, i))
 
                     i += 1
+                    if (random.randint(0, 100) in range(0, int(100*fac))):
+                        
 
-                    if (random.randint(0, 100) in range(0,int(100*fac))):
                         img_comp_prev, mask_comp_prev = img_comp.copy(), mask_comp.copy()
+                        img_path = noise_dict[noise_idx]["images"][np.random.randint(
+                            len(noise_dict[noise_idx]["images"]))]
+                        if img_path in saved_images_and_masks:
+                            img,mask = saved_images_and_masks[img_path]
+                        else:
+                            img, mask = get_img_and_mask(img_path, noise_dict[noise_idx]["background_color"])
+                            saved_images_and_masks[img_path] = (img,mask)
 
-                        img, mask = get_img_and_mask(noise_objects[np.random.randint(len(noise_objects))]
-                                                     )
                         img, mask = resize_transform_obj(img,
                                                          mask,
                                                          longest_min,
@@ -329,30 +406,34 @@ def create_composition(obj_dict, img_comp_bg,  longest_min, longest_max, noise_o
                                                                   y,
                                                                   15 + random_obj
                                                                   )
-                        noise_ok = check_areas(mask_comp, obj_areas,labels_comp, overlap_degree,i)
+                        noise_ok = check_areas(
+                            mask_comp, obj_areas, labels_comp, overlap_degree, i)
                         if noise_ok:
-
-                            obj_areas.append((np.sum(mask_added == 0),15 + random_obj))
-                            labels_comp.append((obj_idx,15 + random_obj))
-                            random_obj +=1
+                            obj_areas.append(
+                                (np.sum(mask_added == 0), 15 + random_obj))
+                            labels_comp.append((obj_idx, 15 + random_obj))
+                            random_obj += 1
                             break
                         else:
                             img_comp, mask_comp = img_comp_prev.copy(), mask_comp_prev.copy()
+                            break
                     break
+
                 else:
                     p += 1
                     img_comp, mask_comp = img_comp_prev.copy(), mask_comp_prev.copy()
-    obj_idx = np.random.randint(len(obj_dict)) + 1
 
-    return img_comp, mask_comp, labels_comp, obj_areas
+    return img_comp, mask_comp, labels_comp,saved_images_and_masks
 
 
 def initiate_annotation(final_image_path, img_width, img_height):
-    tree = ET.ElementTree(ET.fromstring("<annotation> </annotation>"))
+    tree = ET.ElementTree(
+        ET.fromstring("<annotation> </annotation>"))
     root = tree.getroot()
     ET.SubElement(root, "folder").text = os.path.dirname(
         final_image_path).split("/")[-1]
-    ET.SubElement(root, "filename").text = os.path.basename(final_image_path)
+    ET.SubElement(root, "filename").text = os.path.basename(
+        final_image_path)
     ET.SubElement(root, "path").text = final_image_path
     source = ET.SubElement(root, "source")
     ET.SubElement(source, "database").text = "Unknown"
@@ -383,65 +464,79 @@ def save_annotations(tree, final_image_path):
     tree.write(xml_path)
 
 
-def generate_images_and_xml(INPUT_LIST, BACKGROUND_PATH, noise_path, NUMBER_OF_IMAGES, MAX_OBJECTS_PER_IMG, OUTPUT_FOLDER, OVERLAP_DEGREE=0.3):
+def generate_images_and_xml(INPUT_LIST, BACKGROUND_LIST, NOISE_LIST, NUMBER_OF_IMAGES, MAX_OBJECTS_PER_IMG, OUTPUT_FOLDER, OVERLAP_DEGREE=0.3):
 
-    files_bg_imgs = os.listdir(BACKGROUND_PATH)
-    files_bg_imgs = [os.path.join(BACKGROUND_PATH, f) for f in files_bg_imgs]
+    files_bg_imgs = []
+    for k in BACKGROUND_LIST:
+        temp_files_bg_imgs = os.listdir(k[0])
+        files_bg_imgs += [os.path.join(k[0], f) for f in temp_files_bg_imgs]
 
-    noise_objects = os.listdir(noise_path)
-    noise_objects = [os.path.join(noise_path, f) for f in noise_objects]
+    noise_dict = {}
+    ##If we load the image and retrive mask we put it in dictionary. To make it run faster
+    saved_images_and_masks={}
+    saved_backgrounds={}
+    NOISE_NUMBER = 1
+    for k in NOISE_LIST:
+        files_noise = sorted(os.listdir(k[0]))
+        files_imgs = [os.path.join(k[0], f) for f in files_noise]
+        noise_dict[NOISE_NUMBER] = {'folder': k[0],  # folder path
+                                    'images': files_imgs,
+                                    'background_color': k[1]}  # image path
+        NOISE_NUMBER += 1
     INPUT_NUMBER = 1
     obj_dict = {}
     for k in INPUT_LIST:
-        files_imgs = sorted(os.listdir(k[1]))
-        files_imgs = [os.path.join(k[1], f) for f in files_imgs]
-        obj_dict[INPUT_NUMBER] = {'folder': k[1],
-                                  'class': k[0], 'images': files_imgs}
+        files_imgs = sorted(os.listdir(k[0]))
+        files_imgs = [os.path.join(k[0], f) for f in files_imgs]
+        obj_dict[INPUT_NUMBER] = {'folder': k[0],  # folder path
+                                  'class': k[1],  # class name
+                                  'images': files_imgs,
+                                  'background_color': k[2]}  # image path
         INPUT_NUMBER += 1
     colors = {1: (255, 0, 0), 2: (0, 255, 0),
               3: (0, 0, 255), 4: (0, 255, 255), 5: (255, 255, 0), 6: (255, 0, 255), 7: (255, 255, 255)}
 
-    for x in tqdm (range (NUMBER_OF_IMAGES), desc="Loading..."):
+    for x in tqdm(range(NUMBER_OF_IMAGES), desc="Loading..."):
+
         image_background_path = random.choice(files_bg_imgs)
-        img_bg = cv2.imread(image_background_path)
-        h, w = img_bg.shape[0], img_bg.shape[1]
+        if image_background_path in saved_backgrounds:
+            img_bg,h,w = saved_backgrounds[image_background_path]
+        else:
+
+            img_bg = cv2.imread(image_background_path)
+            h, w = img_bg.shape[0], img_bg.shape[1]
+            saved_backgrounds[image_background_path]=(img_bg,h,w)
         mask_comp = np.zeros((h, w), dtype=np.uint8)
         img_comp = img_bg.copy()
-        img_comp, mask_comp, labels_comp, obj_areas = create_composition(obj_dict, img_bg, h*0.1, h*0.5, noise_objects=noise_objects,
+
+        img_comp, mask_comp, labels_comp,saved_images_and_masks = create_composition(obj_dict, img_bg, h*0.1, h*0.5, noise_dict=noise_dict,
                                                                          max_objs=MAX_OBJECTS_PER_IMG,
                                                                          overlap_degree=OVERLAP_DEGREE,
-                                                                         max_attempts_per_obj=10)
-        
-        
-        print("OBJ AREAS: ",obj_areas )
-        print("labels_comp: ",labels_comp )
+                                                                         max_attempts_per_obj=10,saved_images_and_masks=saved_images_and_masks)
 
         img_comp_bboxes = img_comp.copy()
         new_output_name = os.path.join(OUTPUT_FOLDER, os.path.basename(
             image_background_path))[:-4]+"gen_"+str(x)+".png"
         cv2.imwrite(new_output_name, img_comp_bboxes)
 
+        # save annotations
         obj_ids = np.unique(mask_comp).astype(np.uint8)[1:]
         masks = mask_comp == obj_ids[:, None, None]
         tree = initiate_annotation(new_output_name, w, h)
-     
-        result = np.where(obj_ids > 14)
-        obj_ids=np.delete(obj_ids,result[0])
-        print("labels_comp_before: ",labels_comp )
 
-        print("DELETE: ", result)
+        result = np.where(obj_ids > 14)
+        obj_ids = np.delete(obj_ids, result[0])
+
         deleteInd = []
         ind = 0
         for label in labels_comp:
-            print(label)
-            if label[1]>14:
+            if label[1] > 14:
                 deleteInd.append(ind)
-            ind +=1
-        
+            ind += 1
+
         for index in sorted(deleteInd, reverse=True):
             del labels_comp[index]
-        print("OBJ AREAS: ",obj_ids )
-        print("labels_comp: ",labels_comp )
+
         for i in range(len(obj_ids)):
             pos = np.where(masks[i])
             xmin = np.min(pos[1])
@@ -450,12 +545,9 @@ def generate_images_and_xml(INPUT_LIST, BACKGROUND_PATH, noise_path, NUMBER_OF_I
             ymax = np.max(pos[0])
             try:
                 add_annotation(tree, xmin, ymin, xmax, ymax,
-                           obj_dict[labels_comp[i][0]]["class"])
+                               obj_dict[labels_comp[i][0]]["class"])
             except:
-                print("An exception occurred: ",i)
-                print(labels_comp)
-
-
+                print("An exception occurred: ", i)
 
             img_comp_bboxes = cv2.putText(img_comp_bboxes, obj_dict[labels_comp[i][0]]["class"],
                                           (xmin, ymin-20),
@@ -471,22 +563,24 @@ def generate_images_and_xml(INPUT_LIST, BACKGROUND_PATH, noise_path, NUMBER_OF_I
                                             2)
 
         save_annotations(tree, new_output_name)
-        cv2.imwrite("result_mask_"+str(x)+".png", mask_comp*255)
-
-        cv2.imwrite("result_img_"+str(x)+".png", img_comp_bboxes)
 
 
 def main():
 
     args = get_args()
-    count = 0
-    test_input_list = []
-    for obj_folder in args.object_folder:
-        test_input_list += [(args.object_classes[count], obj_folder)]
-        count += 1
 
-    generate_images_and_xml(
-        test_input_list, args.background_folder, args.noisepath, args.generate, args.max_obj, args.output_folder, args.max_ovp)
+    config_desc = {"Object_desc": [], "Noise_desc": [], "Background_folder": [], "Output_folder": [
+    ], "Generate_quantity": [], "Max_objects_per_image": [], "Max_overlap": []}
+    current = ""
+    with open(args.config_path) as config_txt:
+        for line in config_txt:
+            if line.strip() == "Object_desc" or line.strip() == "Noise_desc" or line.strip() == "Background_folder" or line.strip() == "Output_folder" or line.strip() == "Generate_quantity" or line.strip() == "Max_objects_per_image" or line.strip() == "Max_overlap":
+                current = line.strip()
+            elif current != "" and line.strip() != "":
+                config_desc[current].append((line.split('\n')[0].split(":")))
+
+    generate_images_and_xml(config_desc["Object_desc"], config_desc["Background_folder"], config_desc["Noise_desc"], int(config_desc["Generate_quantity"][0][0]), int(
+        config_desc["Max_objects_per_image"][0][0]), config_desc["Output_folder"][0][0], float(config_desc["Max_overlap"][0][0]))
 
 
 if __name__ == "__main__":
