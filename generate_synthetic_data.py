@@ -94,8 +94,12 @@ def resize_transform_obj(img, mask, longest_min, longest_max, transforms=False):
             0.2, 0.4), crop_top=random.uniform(0.2, 0.4), crop_bottom=random.uniform(0.2, 0.4), always_apply=False, p=1.0),
     ], bbox_params=Al.BboxParams(format='yolo'))
 
-    img = flip(image=img, bboxes=[])["image"]
-    img = crop(image=img, bboxes=[])["image"]
+    flip_transform = flip(image=img, mask=mask, bboxes=[])
+    crop_transform = crop(image=img, mask=mask, bboxes=[])
+    img = flip_transform["image"]
+    img = crop_transform["image"]
+    mask = flip_transform["mask"]
+    mask = crop_transform["mask"]
     transformed = transform(image=img, bboxes=[])
     transformed_image = transformed['image']
     h, w = transformed_image.shape[0], transformed_image.shape[1]
