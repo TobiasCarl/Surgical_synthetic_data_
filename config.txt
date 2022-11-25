@@ -1,8 +1,6 @@
 Object_desc
-/home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_forceps/images:forceps:green
 /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_dia/images:diathermy:green
-/home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_needle/images:needle driver:green
-/home/tobiaa/InstrumentDet/Surgical_synthetic_data_/data/demo_scissors/images:scissors:green
+
 Noise_desc
 demo_noise:green
 Background_folder
@@ -12,7 +10,7 @@ Output_folder
 /home/tobiaa/InstrumentDet/Surgical_synthetic_data_/demo_test_output
 
 Generate_quantity
-100
+5
 
 Max_objects_per_image
 5
