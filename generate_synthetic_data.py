@@ -713,6 +713,11 @@ def add_annotation(tree, xmin, ymin, xmax, ymax, class_name):
     ET.SubElement(new_object, "truncated").text = "0"
     ET.SubElement(new_object, "difficult").text = "0"
     bnd_box = ET.SubElement(new_object, "bndbox")
+
+    #labelImg starts indexing at 1
+    xmin = 1 if xmin == 0 else xmin
+    ymin = 1 if ymin == 0 else ymin
+
     ET.SubElement(bnd_box, "xmin").text = str(xmin)
     ET.SubElement(bnd_box, "ymin").text = str(ymin)
     ET.SubElement(bnd_box, "xmax").text = str(xmax)
