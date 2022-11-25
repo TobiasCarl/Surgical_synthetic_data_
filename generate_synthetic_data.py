@@ -7,7 +7,6 @@ import skimage.exposure
 import random
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
-
 from PIL import Image, ImageEnhance
 import random as rand
 import numpy
@@ -20,6 +19,49 @@ def get_args():
     parser.add_argument('-config', '--config_path',  required=True, action='store', default='.',
                         help="Config file that describes augmentation parameters")
     return parser.parse_args()
+
+
+
+def show_img(img):
+    return
+    img_h, img_w = img.shape[0], img.shape[1]
+    print(f"image w: {img_w} h: {img_h}")
+    win_name = "window"
+    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+    cv2.imshow(win_name, img)
+
+    max_size = 1080
+    width_ratio, height_ratio = max_size/img_w, max_size/img_h
+    scale_factor = min(1, width_ratio, height_ratio)
+    window_w, window_h = int(scale_factor*img_w), int(scale_factor*img_h)
+    print(f"window w: {window_w} h: {window_h}\n")
+
+    cv2.resizeWindow(win_name, 3840, 2160) #resize must come after imshow for it to work properly
+    cv2.waitKey(0)
+
+def show_img_1(img):
+    img_h, img_w = img.shape[0], img.shape[1]
+    print(f"image w: {img_w} h: {img_h}")
+    win_name = "window"
+    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+    cv2.imshow(win_name, img)
+
+    max_size = 1080
+    width_ratio, height_ratio = max_size/img_w, max_size/img_h
+    scale_factor = min(1, width_ratio, height_ratio)
+    window_w, window_h = int(scale_factor*img_w), int(scale_factor*img_h)
+    print(f"window w: {window_w} h: {window_h}\n")
+
+    cv2.resizeWindow(win_name, 1920, 1080) #resize must come after imshow for it to work properly
+    cv2.waitKey(0)
+
+#assumes input mask values are 0 and background values are 1
+def show_mask(mask):
+    mask = mask.copy()
+    mask[mask == 0] = 255
+    mask[mask == 1] = 0
+    show_img(mask)
+
 
 
 
@@ -103,6 +145,9 @@ def get_img_and_mask(img_path, color):
         127.5, 255), out_range=(0, 255)).astype(np.uint8)
 
     cv2_img = replace_background_with_average_color(cv2_img, mask)
+
+    show_img(cv2_img)
+    show_img(mask)
 
     show_img(cv2_img)
     show_img(mask)
